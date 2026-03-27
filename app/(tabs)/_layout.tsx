@@ -11,7 +11,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'RunAnywhere Demo',
+          title: 'CodeVault',
         }}
       />
       <Tabs.Screen

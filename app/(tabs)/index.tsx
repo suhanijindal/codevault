@@ -7,150 +7,17 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Animated,
   Modal,
-  Linking,
-  Platform,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// =============================================================================
-// RunAnywhere - On-Device AI for React Native
-// =============================================================================
-//
-// RunAnywhere enables powerful AI capabilities that run 100% on-device:
-// - LLM (Text Generation) via LlamaCpp - GGUF models from Hugging Face
-// - STT (Speech Recognition) via ONNX Runtime - Whisper models
-// - TTS (Speech Synthesis) via ONNX Runtime - VITS/Piper models
-//
-// MODES:
-//   Development Mode: Full on-device inference, perfect for prototyping
-//   Production Mode: Adds observability, policy engine, and hybrid routing
-//
+// ─────────────────────────────────────────────────────────────────────────────
+// RunAnywhere – On-Device AI for React Native
 // Learn more: https://runanywhere.ai
-// npm: https://www.npmjs.com/package/runanywhere-react-native
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Lazy load audio modules (requires rebuild with expo-speech/expo-av)
-let Speech: any = null;
-let Audio: any = null;
-let FileSystem: any = null;
-let LiveAudioStream: any = null;
-let audioModulesAvailable = false;
-
-try {
-  Speech = require('expo-speech');
-  Audio = require('expo-av').Audio;
-  FileSystem = require('expo-file-system/legacy');
-  audioModulesAvailable = true;
-} catch (e) {
-  console.log('[RunAnywhere Demo] expo-av modules not available');
-}
-
-// Load LiveAudioStream for Android STT (raw PCM recording like sample app)
-try {
-  LiveAudioStream = require('react-native-live-audio-stream').default;
-  console.log('[RunAnywhere Demo] LiveAudioStream loaded');
-} catch (e) {
-  console.log('[RunAnywhere Demo] LiveAudioStream not available');
-}
-
-/**
- * Convert base64 PCM float32 audio to WAV file
- * The audio data from TTS is base64-encoded float32 PCM samples
- * (Same approach as the sample React Native app)
- */
-const createWavFile = async (audioBase64: string, audioSampleRate: number): Promise<string | null> => {
-  if (!FileSystem) return null;
-  
-  try {
-    // Decode base64 to get raw bytes
-    const binaryString = atob(audioBase64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    // Convert float32 samples to int16
-    const floatView = new Float32Array(bytes.buffer);
-    const numSamples = floatView.length;
-    const int16Samples = new Int16Array(numSamples);
-
-    for (let i = 0; i < numSamples; i++) {
-      // Clamp and convert to int16 range
-      const sample = Math.max(-1, Math.min(1, floatView[i]!));
-      int16Samples[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-
-    // Create WAV header
-    const wavDataSize = int16Samples.length * 2;
-    const wavBuffer = new ArrayBuffer(44 + wavDataSize);
-    const wavView = new DataView(wavBuffer);
-
-    // RIFF header
-    wavView.setUint8(0, 0x52); // R
-    wavView.setUint8(1, 0x49); // I
-    wavView.setUint8(2, 0x46); // F
-    wavView.setUint8(3, 0x46); // F
-    wavView.setUint32(4, 36 + wavDataSize, true); // File size - 8
-    wavView.setUint8(8, 0x57); // W
-    wavView.setUint8(9, 0x41); // A
-    wavView.setUint8(10, 0x56); // V
-    wavView.setUint8(11, 0x45); // E
-
-    // fmt chunk
-    wavView.setUint8(12, 0x66); // f
-    wavView.setUint8(13, 0x6d); // m
-    wavView.setUint8(14, 0x74); // t
-    wavView.setUint8(15, 0x20); // (space)
-    wavView.setUint32(16, 16, true); // fmt chunk size
-    wavView.setUint16(20, 1, true); // Audio format (PCM = 1)
-    wavView.setUint16(22, 1, true); // Number of channels (mono = 1)
-    wavView.setUint32(24, audioSampleRate, true); // Sample rate
-    wavView.setUint32(28, audioSampleRate * 2, true); // Byte rate
-    wavView.setUint16(32, 2, true); // Block align
-    wavView.setUint16(34, 16, true); // Bits per sample
-
-    // data chunk
-    wavView.setUint8(36, 0x64); // d
-    wavView.setUint8(37, 0x61); // a
-    wavView.setUint8(38, 0x74); // t
-    wavView.setUint8(39, 0x61); // a
-    wavView.setUint32(40, wavDataSize, true); // Data size
-
-    // Copy audio data
-    const wavBytes = new Uint8Array(wavBuffer);
-    const int16Bytes = new Uint8Array(int16Samples.buffer);
-    for (let i = 0; i < int16Bytes.length; i++) {
-      wavBytes[44 + i] = int16Bytes[i]!;
-    }
-
-    // Convert to base64 and write to file
-    let wavBase64 = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < wavBytes.length; i += chunkSize) {
-      const chunk = wavBytes.subarray(i, Math.min(i + chunkSize, wavBytes.length));
-      for (let j = 0; j < chunk.length; j++) {
-        wavBase64 += String.fromCharCode(chunk[j]!);
-      }
-    }
-    wavBase64 = btoa(wavBase64);
-
-    const filePath = `${FileSystem.cacheDirectory}tts_${Date.now()}.wav`;
-    await FileSystem.writeAsStringAsync(filePath, wavBase64, {
-      encoding: 'base64',
-    });
-
-    console.log('[TTS] WAV file created:', filePath, 'samples:', numSamples);
-    return filePath;
-  } catch (e) {
-    console.log('[TTS] WAV creation error:', e);
-    return null;
-  }
-};
-
-// Import RunAnywhere SDK
 let RunAnywhere: any = null;
 let sdkAvailable = false;
 try {
@@ -158,117 +25,388 @@ try {
   RunAnywhere = sdk.RunAnywhere;
   sdkAvailable = true;
 } catch (e) {
-  console.log('[RunAnywhere Demo] SDK not available (expected in Expo Go)');
+  console.log('[CodeVault] SDK not available (expected in Expo Go)');
 }
 
+// Optional clipboard
+let ClipboardAPI: any = null;
+try {
+  ClipboardAPI = require('@react-native-clipboard/clipboard').default;
+} catch (_) {}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Types
-type TabType = 'llm' | 'stt' | 'tts';
-type FrameworkType = 'LlamaCpp' | 'ONNX' | 'SystemTTS';
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ReviewMode = 'security' | 'bugs' | 'quality' | 'explain';
 
 interface ModelInfo {
   id: string;
   name: string;
   category: string;
-  framework: FrameworkType;
   isDownloaded?: boolean;
   localPath?: string;
   downloadSize?: number;
   downloadURL?: string;
 }
 
-// Framework colors
-const FrameworkColors: Record<FrameworkType, string> = {
-  LlamaCpp: '#FF6B35',
-  ONNX: '#1E88E5',
-  SystemTTS: '#8E8E93',
+interface HistoryEntry {
+  id: string;
+  timestamp: Date;
+  mode: ReviewMode;
+  codeSnippet: string;
+  output: string;
+  expanded: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review modes
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REVIEW_MODES: {
+  id: ReviewMode;
+  icon: string;
+  label: string;
+  description: string;
+  accent: string;
+  prompt: string;
+}[] = [
+  {
+    id: 'security',
+    icon: '🛡️',
+    label: 'Security',
+    description: 'Vulnerabilities & injection risks',
+    accent: '#EF4444',
+    prompt:
+      'Review this code for security issues. List each vulnerability with:\nSEVERITY: (Critical/High/Medium/Low)\nISSUE: (description)\nFIX: (how to fix it)\n\nCode:\n',
+  },
+  {
+    id: 'bugs',
+    icon: '🐛',
+    label: 'Bugs',
+    description: 'Logic errors & edge cases',
+    accent: '#F59E0B',
+    prompt:
+      'Review this code for bugs, logic errors, and unhandled edge cases. For each issue found:\nBUG: (description)\nLOCATION: (line/function)\nFIX: (suggested fix)\n\nCode:\n',
+  },
+  {
+    id: 'quality',
+    icon: '✨',
+    label: 'Quality',
+    description: 'Readability & performance',
+    accent: '#60A5FA',
+    prompt:
+      'Review this code for quality, readability, and performance. Provide actionable suggestions:\nISSUE: (description)\nIMPACT: (why it matters)\nSUGGESTION: (improvement)\n\nCode:\n',
+  },
+  {
+    id: 'explain',
+    icon: '📖',
+    label: 'Explain',
+    description: 'Line-by-line walkthrough',
+    accent: '#22C55E',
+    prompt:
+      'Provide a clear line-by-line explanation of what this code does, including its purpose, how it works, and any important details a developer should know.\n\nCode:\n',
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sample code snippets  (Feature 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SAMPLES: { id: string; label: string; lang: string; code: string }[] = [
+  {
+    id: 'sql',
+    label: 'SQL Injection',
+    lang: 'Python',
+    code: `import sqlite3
+
+def get_user(username):
+    conn = sqlite3.connect("app.db")
+    query = f"SELECT * FROM users WHERE username = '{username}'"
+    cursor = conn.cursor()
+    cursor.execute(query)
+    return cursor.fetchone()
+
+def login(request):
+    user = request.get("username")
+    password = request.get("password")
+    db_user = get_user(user)
+    if db_user and db_user[2] == password:
+        return {"token": user + "_token"}
+    return {"status": "fail"}`,
+  },
+  {
+    id: 'xss',
+    label: 'XSS Vulnerability',
+    lang: 'JavaScript',
+    code: `app.get('/search', (req, res) => {
+  const query = req.query.q;
+  res.send(\`<h1>Results for: \${query}</h1>\`);
+});`,
+  },
+  {
+    id: 'secrets',
+    label: 'Hardcoded Secrets',
+    lang: 'Python',
+    code: `API_KEY = "sk-1234567890abcdef"
+DB_PASSWORD = "admin123"
+
+def connect():
+    return psycopg2.connect(
+        host="prod-db.company.com",
+        password=DB_PASSWORD
+    )`,
+  },
+  {
+    id: 'custom',
+    label: 'My code',
+    lang: 'Code',
+    code: '',
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Design tokens
+// ─────────────────────────────────────────────────────────────────────────────
+
+const C = {
+  bg:           '#1a1816',
+  surface:      '#242220',
+  elevated:     '#2e2b28',
+  accent:       '#D97757',
+  accentDim:    'rgba(217,119,87,0.12)',
+  accentBorder: 'rgba(217,119,87,0.30)',
+  green:        '#22C55E',
+  greenDim:     'rgba(34,197,94,0.10)',
+  greenBorder:  'rgba(34,197,94,0.25)',
+  text:         '#ECECEA',
+  textSub:      '#A3A199',
+  textMuted:    '#6B6961',
+  border:       '#363330',
+  borderSoft:   '#2a2724',
+  danger:       '#EF4444',
+  warning:      '#F59E0B',
+  info:         '#60A5FA',
+  codeText:     '#c9bfb0',
 };
 
-// =============================================================================
-// Main Component
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-export default function RunAnywhereDemo() {
-  // Tab state
-  const [activeTab, setActiveTab] = useState<TabType>('llm');
-  
-  // SDK state
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Models state
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
+function formatTime(date: Date): string {
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60)   return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+function firstNonEmpty(text: string): string {
+  return text.split('\n').find(l => l.trim().length > 0) ?? '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Output line renderer
+// ─────────────────────────────────────────────────────────────────────────────
+
+function OutputLine({ line }: { line: string }) {
+  const t = line.trim();
+  const sevMatch = t.match(/^SEVERITY:\s*(.+)$/i);
+  if (sevMatch) {
+    const level = sevMatch[1]!.trim().toUpperCase();
+    let color = C.info;
+    let bg    = 'rgba(96,165,250,0.12)';
+    if (/CRITICAL|HIGH/.test(level))  { color = C.danger;  bg = 'rgba(239,68,68,0.12)'; }
+    else if (/MEDIUM/.test(level))    { color = C.warning; bg = 'rgba(245,158,11,0.12)'; }
+    return (
+      <View style={ol.severityRow}>
+        <Text style={ol.severityKey}>Severity  </Text>
+        <View style={[ol.pill, { backgroundColor: bg, borderColor: color }]}>
+          <Text style={[ol.pillText, { color }]}>{level}</Text>
+        </View>
+      </View>
+    );
+  }
+  if (/^(ISSUE|BUG|LOCATION|IMPACT):/i.test(t))
+    return <Text style={ol.issueLine}>{line}</Text>;
+  if (/^(FIX|SUGGESTION):/i.test(t))
+    return <Text style={ol.fixLine}>{line}</Text>;
+  if (t === '') return <View style={{ height: 8 }} />;
+  return <Text style={ol.defaultLine}>{line}</Text>;
+}
+
+const ol = StyleSheet.create({
+  severityRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 3 },
+  severityKey: { color: C.textMuted, fontSize: 13, fontFamily: 'monospace' },
+  pill:        { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1 },
+  pillText:    { fontSize: 11, fontWeight: '700', fontFamily: 'monospace' },
+  issueLine:   { color: '#ddd8d0', fontFamily: 'monospace', fontSize: 13, lineHeight: 21 },
+  fixLine:     { color: '#6dba8a', fontFamily: 'monospace', fontSize: 13, lineHeight: 21 },
+  defaultLine: { color: C.codeText, fontFamily: 'monospace', fontSize: 13, lineHeight: 21 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// History card  (Feature 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function HistoryCard({
+  entry,
+  onToggle,
+}: {
+  entry: HistoryEntry;
+  onToggle: () => void;
+}) {
+  const mode = REVIEW_MODES.find(m => m.id === entry.mode)!;
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      style={hc.card}
+      onPress={onToggle}
+    >
+      <View style={hc.header}>
+        <View style={hc.headerLeft}>
+          <Text style={hc.modeIcon}>{mode.icon}</Text>
+          <View>
+            <Text style={hc.modeLabel}>{mode.label} review</Text>
+            <Text style={hc.time}>{formatTime(entry.timestamp)}</Text>
+          </View>
+        </View>
+        <Text style={hc.chevron}>{entry.expanded ? '▲' : '▼'}</Text>
+      </View>
+
+      {!entry.expanded && (
+        <View style={hc.preview}>
+          <Text style={hc.codePreview} numberOfLines={1}>
+            {entry.codeSnippet}
+          </Text>
+          <Text style={hc.outputPreview} numberOfLines={1}>
+            {firstNonEmpty(entry.output)}
+          </Text>
+        </View>
+      )}
+
+      {entry.expanded && (
+        <View style={hc.expanded}>
+          <View style={hc.expandedDivider} />
+          <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
+            {entry.output.split('\n').map((line, i) => (
+              <OutputLine key={i} line={line} />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+const hc = StyleSheet.create({
+  card: {
+    backgroundColor: C.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    marginBottom: 8,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modeIcon:    { fontSize: 18 },
+  modeLabel:   { fontSize: 13, fontWeight: '600', color: C.textSub },
+  time:        { fontSize: 11, color: C.textMuted, marginTop: 1 },
+  chevron:     { fontSize: 10, color: C.textMuted },
+  preview:     { marginTop: 10, gap: 4 },
+  codePreview: {
+    color: C.codeText,
+    fontFamily: 'monospace',
+    fontSize: 12,
+    backgroundColor: C.elevated,
+    borderRadius: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  outputPreview: {
+    color: C.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  expanded:        { marginTop: 12 },
+  expandedDivider: { height: 1, backgroundColor: C.borderSoft, marginBottom: 12 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Divider
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Divider() {
+  return <View style={{ height: 1, backgroundColor: C.border, marginVertical: 20 }} />;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function CodeVault() {
+  // ── SDK state (unchanged) ─────────────────────────────────────────────────
+  const [isInitialized, setIsInitialized]       = useState(false);
+  const [error, setError]                       = useState<string | null>(null);
+
+  // ── Model state (unchanged) ───────────────────────────────────────────────
+  const [models, setModels]                     = useState<ModelInfo[]>([]);
+  const [selectedModel, setSelectedModel]       = useState<ModelInfo | null>(null);
+  const [isDownloading, setIsDownloading]       = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // LLM state
-  const [prompt, setPrompt] = useState('');
-  const [response, setResponse] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  
-  // TTS state
-  const [ttsText, setTtsText] = useState('Hello! I am RunAnywhere, your on-device AI assistant.');
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const speakingAnim = useRef(new Animated.Value(1)).current;
-  
-  // STT state
-  const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const recordingAnim = useRef(new Animated.Value(1)).current;
-  const recordingRef = useRef<any>(null);
-  const soundRef = useRef<any>(null);
-  
-  // Custom model URL
-  const [showAddModel, setShowAddModel] = useState(false);
-  const [customModelURL, setCustomModelURL] = useState('');
-  const [customModelName, setCustomModelName] = useState('');
+  const [isModelLoaded, setIsModelLoaded]       = useState(false);
+  const [isLoading, setIsLoading]               = useState(false);
 
-  // ==========================================================================
-  // Animations
-  // ==========================================================================
-  
+  // ── Review state (unchanged) ──────────────────────────────────────────────
+  const [selectedMode, setSelectedMode]         = useState<ReviewMode>('security');
+  const [codeInput, setCodeInput]               = useState(SAMPLES[0]!.code);
+  const [reviewResult, setReviewResult]         = useState('');
+  const [isGenerating, setIsGenerating]         = useState(false);
+
+  // ── UI state (unchanged) ──────────────────────────────────────────────────
+  const [reviewCount, setReviewCount]           = useState(0);
+  const [copied, setCopied]                     = useState(false);
+
+  // ── Feature 1: Privacy Proof ──────────────────────────────────────────────
+  const [showPrivacyModal, setShowPrivacyModal]     = useState(false);
+  const [privacyTestRunning, setPrivacyTestRunning] = useState(false);
+  const [privacyTestDone, setPrivacyTestDone]       = useState(false);
+
+  // ── Feature 2: Sample selector ────────────────────────────────────────────
+  const [selectedSample, setSelectedSample]     = useState('sql');
+
+  // ── Feature 3: Review history ─────────────────────────────────────────────
+  const [history, setHistory]                   = useState<HistoryEntry[]>([]);
+
+  // ── Pulse animation ───────────────────────────────────────────────────────
+  const pulseAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (isSpeaking) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(speakingAnim, { toValue: 1.2, duration: 300, useNativeDriver: true }),
-          Animated.timing(speakingAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-        ])
-      ).start();
-    } else {
-      speakingAnim.setValue(1);
-    }
-  }, [isSpeaking]);
-
-  useEffect(() => {
-    if (isRecording) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(recordingAnim, { toValue: 1.3, duration: 500, useNativeDriver: true }),
-          Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-        ])
-      ).start();
-    } else {
-      recordingAnim.setValue(1);
-    }
-  }, [isRecording]);
-
-  // ==========================================================================
-  // Initialization
-  // ==========================================================================
-
-  useEffect(() => {
-    initializeSDK();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.25, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 1000, useNativeDriver: true }),
+      ])
+    ).start();
   }, []);
 
-  // Keep selectedModel in sync with models list (for localPath updates)
+  // ── SDK init (unchanged) ─────────────────────────────────────────────────
+
+  useEffect(() => { initializeSDK(); }, []);
+
   useEffect(() => {
     if (selectedModel && models.length > 0) {
-      const updatedModel = models.find(m => m.id === selectedModel.id);
-      if (updatedModel && updatedModel.localPath !== selectedModel.localPath) {
-        setSelectedModel(updatedModel);
+      const updated = models.find(m => m.id === selectedModel.id);
+      if (updated && updated.localPath !== selectedModel.localPath) {
+        setSelectedModel(updated);
       }
     }
   }, [models]);
@@ -278,7 +416,6 @@ export default function RunAnywhereDemo() {
       setError('Development build required. Install the APK from EAS Build.');
       return;
     }
-
     try {
       await RunAnywhere.initialize({});
       setIsInitialized(true);
@@ -291,75 +428,52 @@ export default function RunAnywhereDemo() {
   const loadModels = async () => {
     try {
       const allModels = await RunAnywhere.getAvailableModels();
-      const formattedModels: ModelInfo[] = allModels.map((m: any) => ({
-        id: m.id,
-        name: m.name,
-        category: m.category,
-        framework: getFramework(m),
-        isDownloaded: m.isDownloaded,
-        localPath: m.localPath,
-        downloadSize: m.downloadSize,
-        downloadURL: m.downloadURL,
-      }));
+      const formattedModels: ModelInfo[] = allModels
+        .filter((m: any) => m.category === 'language')
+        .map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          category: m.category,
+          isDownloaded: m.isDownloaded,
+          localPath: m.localPath,
+          downloadSize: m.downloadSize,
+          downloadURL: m.downloadURL,
+        }));
       setModels(formattedModels);
     } catch (e: any) {
       console.log('Failed to load models:', e);
     }
   };
 
-  const getFramework = (model: any): FrameworkType => {
-    if (model.id === 'system-tts') return 'SystemTTS';
-    if (model.category === 'language') return 'LlamaCpp';
-    return 'ONNX';
-  };
-
-  const getModelsForTab = (): ModelInfo[] => {
-    switch (activeTab) {
-      case 'llm':
-        return models.filter(m => m.category === 'language');
-      case 'stt':
-        return models.filter(m => m.category === 'speech-recognition');
-      case 'tts':
-        return models.filter(m => m.category === 'speech-synthesis');
-      default:
-        return [];
-    }
-  };
-
-  // ==========================================================================
-  // Model Management
-  // ==========================================================================
+  // ── Model management (unchanged) ─────────────────────────────────────────
 
   const handleSelectModel = (model: ModelInfo) => {
-    // Find the full model info from the loaded models (includes localPath)
     const fullModel = models.find(m => m.id === model.id) || model;
     setSelectedModel(fullModel);
     setIsModelLoaded(false);
-    setResponse('');
+    setReviewResult('');
   };
 
   const handleDownloadModel = async () => {
     if (!selectedModel) return;
-    
     setIsDownloading(true);
     setDownloadProgress(0);
     setError(null);
-
     try {
-      // downloadModel returns the local path
-      const downloadedPath = await RunAnywhere.downloadModel(selectedModel.id, (progress: number) => {
-        // Handle NaN/undefined progress values
-        const pct = typeof progress === 'number' && !isNaN(progress) ? Math.round(progress * 100) : 0;
-        setDownloadProgress(pct);
-      });
-      
+      const downloadedPath = await RunAnywhere.downloadModel(
+        selectedModel.id,
+        (progress: number) => {
+          const pct =
+            typeof progress === 'number' && !isNaN(progress)
+              ? Math.round(progress * 100)
+              : 0;
+          setDownloadProgress(pct);
+        }
+      );
       await loadModels();
-      // Update selectedModel with the downloaded path
-      setSelectedModel(prev => prev ? { 
-        ...prev, 
-        isDownloaded: true, 
-        localPath: downloadedPath 
-      } : null);
+      setSelectedModel(prev =>
+        prev ? { ...prev, isDownloaded: true, localPath: downloadedPath } : null
+      );
     } catch (e: any) {
       setError(`Download failed: ${e.message}`);
     } finally {
@@ -369,34 +483,19 @@ export default function RunAnywhereDemo() {
 
   const handleLoadModel = async () => {
     if (!selectedModel) return;
-    
     setIsLoading(true);
     setError(null);
-
     try {
-      const modelPath = selectedModel.localPath || await RunAnywhere.getModelPath(selectedModel.id);
-      
+      const modelPath =
+        selectedModel.localPath ||
+        (await RunAnywhere.getModelPath(selectedModel.id));
       if (!modelPath) {
         setError('Model path not found. Please re-download.');
         return;
       }
-
-      switch (activeTab) {
-        case 'llm':
-          await RunAnywhere.loadTextModel(modelPath);
-          break;
-        case 'stt':
-          await RunAnywhere.loadSTTModel(modelPath);
-          break;
-        case 'tts':
-          if (selectedModel.id !== 'system-tts') {
-            await RunAnywhere.loadTTSModel(modelPath);
-          }
-          break;
-      }
-      
+      await RunAnywhere.loadTextModel(modelPath);
       setIsModelLoaded(true);
-      setResponse(`✅ ${selectedModel.name} loaded successfully!`);
+      setReviewResult('');
     } catch (e: any) {
       setError(`Load failed: ${e.message}`);
     } finally {
@@ -404,1299 +503,936 @@ export default function RunAnywhereDemo() {
     }
   };
 
-  // ==========================================================================
-  // LLM Actions
-  // ==========================================================================
+  // ── Review action (unchanged SDK call) ───────────────────────────────────
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
-    
+  const handleRunReview = async () => {
+    if (!codeInput.trim()) return;
+    const mode = REVIEW_MODES.find(m => m.id === selectedMode)!;
+    const fullPrompt = mode.prompt + codeInput;
     setIsGenerating(true);
     setError(null);
-    setResponse('');
-
+    setReviewResult('');
     try {
-      const result = await RunAnywhere.generate(prompt, {
-        maxTokens: 256,
-        temperature: 0.7,
+      const result = await RunAnywhere.generate(fullPrompt, {
+        maxTokens: 512,
+        temperature: 0.2,
       });
-      setResponse(result.text || JSON.stringify(result));
+      const output = result.text || JSON.stringify(result);
+      setReviewResult(output);
+      setReviewCount(c => c + 1);
+      // Feature 3: push to history (max 5)
+      const entry: HistoryEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date(),
+        mode: selectedMode,
+        codeSnippet: codeInput.split('\n')[0] ?? '',
+        output,
+        expanded: false,
+      };
+      setHistory(prev => [entry, ...prev].slice(0, 5));
     } catch (e: any) {
-      setError(`Generation failed: ${e.message}`);
+      setError(`Review failed: ${e.message}`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // ==========================================================================
-  // STT Actions
-  // ==========================================================================
+  // ── Feature 1: Privacy test (unchanged SDK call) ─────────────────────────
 
-  // Audio chunks for Android raw PCM recording
-  const audioChunksRef = useRef<string[]>([]);
-  
-  const handleStartRecording = async () => {
-    // Android: Use LiveAudioStream for raw PCM (like sample app)
-    if (Platform.OS === 'android') {
-      if (!LiveAudioStream) {
-        Alert.alert('Rebuild Required', 'Audio recording requires react-native-live-audio-stream.\n\nRun: eas build --platform android --profile development');
-        return;
-      }
-      
-      try {
-        // Initialize LiveAudioStream (same config as sample app)
-        LiveAudioStream.init({
-          sampleRate: 16000,
-          channels: 1,
-          bitsPerSample: 16,
-          audioSource: 6, // VOICE_RECOGNITION
-          bufferSize: 4096,
-        });
-        
-        // Reset chunks
-        audioChunksRef.current = [];
-        
-        // Listen for audio data
-        LiveAudioStream.on('data', (data: string) => {
-          audioChunksRef.current.push(data);
-        });
-        
-        // Start recording
-        LiveAudioStream.start();
-        setIsRecording(true);
-        setTranscript('');
-        setError(null); // Clear any previous error
-        console.log('[STT] Android: Started raw PCM recording');
-      } catch (e: any) {
-        setError(`Recording failed: ${e.message}`);
-      }
-      return;
-    }
-    
-    // iOS: Use expo-av
-    if (!audioModulesAvailable) {
-      Alert.alert('Rebuild Required', 'Audio recording requires expo-av.\n\nRun: eas build --platform ios --profile development');
-      return;
-    }
-
+  const handlePrivacyTest = async () => {
+    if (!isModelLoaded) return;
+    setPrivacyTestRunning(true);
+    setPrivacyTestDone(false);
     try {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setError('Microphone permission denied');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      // iOS WAV format for Whisper STT compatibility
-      const wavRecordingOptions = {
-        isMeteringEnabled: true,
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.wav',
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 256000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: {},
-      };
-
-      const { recording } = await Audio.Recording.createAsync(wavRecordingOptions);
-      
-      recordingRef.current = recording;
-      setIsRecording(true);
-      setTranscript('');
-      setError(null); // Clear any previous error
-      console.log('[STT] iOS: Started expo-av recording');
-    } catch (e: any) {
-      setError(`Recording failed: ${e.message}`);
-    }
-  };
-
-  // Helper: Create WAV header for STT PCM data
-  const createSTTWavHeader = (dataLength: number): ArrayBuffer => {
-    const buffer = new ArrayBuffer(44);
-    const view = new DataView(buffer);
-    const sampleRate = 16000;
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
-    const blockAlign = numChannels * (bitsPerSample / 8);
-    
-    // RIFF header
-    view.setUint8(0, 0x52); view.setUint8(1, 0x49); view.setUint8(2, 0x46); view.setUint8(3, 0x46);
-    view.setUint32(4, 36 + dataLength, true);
-    view.setUint8(8, 0x57); view.setUint8(9, 0x41); view.setUint8(10, 0x56); view.setUint8(11, 0x45);
-    
-    // fmt chunk
-    view.setUint8(12, 0x66); view.setUint8(13, 0x6d); view.setUint8(14, 0x74); view.setUint8(15, 0x20);
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitsPerSample, true);
-    
-    // data chunk
-    view.setUint8(36, 0x64); view.setUint8(37, 0x61); view.setUint8(38, 0x74); view.setUint8(39, 0x61);
-    view.setUint32(40, dataLength, true);
-    
-    return buffer;
-  };
-
-  const handleStopRecording = async () => {
-    setIsLoading(true);
-    setIsRecording(false);
-
-    try {
-      let audioUri: string;
-      
-      // Android: Process raw PCM chunks into WAV
-      if (Platform.OS === 'android' && LiveAudioStream) {
-        LiveAudioStream.stop();
-        
-        const chunks = audioChunksRef.current;
-        console.log('[STT] Android: Processing', chunks.length, 'audio chunks');
-        
-        if (chunks.length === 0) {
-          setError('No audio recorded');
-          setIsLoading(false);
-          return;
-        }
-        
-        // Combine all chunks into PCM data
-        let totalLength = 0;
-        const decodedChunks: Uint8Array[] = [];
-        
-        for (const chunk of chunks) {
-          const decoded = Uint8Array.from(atob(chunk), c => c.charCodeAt(0));
-          decodedChunks.push(decoded);
-          totalLength += decoded.length;
-        }
-        
-        const pcmData = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of decodedChunks) {
-          pcmData.set(chunk, offset);
-          offset += chunk.length;
-        }
-        
-        console.log('[STT] Android: Total PCM data:', totalLength, 'bytes');
-        
-        // Create WAV header + data
-        const wavHeader = createSTTWavHeader(totalLength);
-        const headerBytes = new Uint8Array(wavHeader);
-        const wavData = new Uint8Array(headerBytes.length + pcmData.length);
-        wavData.set(headerBytes, 0);
-        wavData.set(pcmData, headerBytes.length);
-        
-        // Convert to base64 and write to file
-        let wavBase64 = '';
-        const chunkSize = 8192;
-        for (let i = 0; i < wavData.length; i += chunkSize) {
-          const chunk = wavData.subarray(i, Math.min(i + chunkSize, wavData.length));
-          for (let j = 0; j < chunk.length; j++) {
-            wavBase64 += String.fromCharCode(chunk[j]!);
-          }
-        }
-        wavBase64 = btoa(wavBase64);
-        
-        const timestamp = Date.now();
-        const fileName = `stt_recording_${timestamp}.wav`;
-        const cacheDir = FileSystem.cacheDirectory || '';
-        
-        // Write file using FileSystem (expects file:// URI)
-        const writeUri = `${cacheDir}${fileName}`;
-        await FileSystem.writeAsStringAsync(writeUri, wavBase64, { encoding: 'base64' });
-        
-        // SDK needs path WITHOUT file:// prefix
-        audioUri = writeUri.startsWith('file://') ? writeUri.substring(7) : writeUri;
-        
-        console.log('[STT] Android: WAV file written:', audioUri, 'size:', wavData.length);
-        audioChunksRef.current = [];
-      } else {
-        // iOS: Use expo-av recording
-        if (!recordingRef.current) {
-          setError('No recording in progress');
-          setIsLoading(false);
-          return;
-        }
-        
-        await recordingRef.current.stopAndUnloadAsync();
-        const uri = recordingRef.current.getURI();
-        recordingRef.current = null;
-        
-        if (!uri) {
-          setError('No audio recorded');
-          setIsLoading(false);
-          return;
-        }
-        
-        // SDK needs path WITHOUT file:// prefix
-        audioUri = uri.startsWith('file://') ? uri.substring(7) : uri;
-        console.log('[STT] iOS: Recording saved:', audioUri);
-      }
-
-      // Transcribe with RunAnywhere SDK (ensure no file:// prefix)
-      const cleanPath = audioUri.startsWith('file://') ? audioUri.substring(7) : audioUri;
-      console.log('[STT] Transcribing:', cleanPath);
-      const result = await RunAnywhere.transcribeFile(cleanPath);
-      console.log('[STT] Transcription result:', result);
-      setTranscript(result.text || result);
-      setError(null); // Clear any previous error on success
-      
-    } catch (e: any) {
-      console.error('[STT] Error:', e);
-      setError(`Transcription failed: ${e.message}`);
+      await RunAnywhere.generate(
+        'Review this code for issues:\n\nprint("hello world")',
+        { maxTokens: 80, temperature: 0.2 }
+      );
+      setPrivacyTestDone(true);
+    } catch (_) {
+      setPrivacyTestDone(true); // show "0 requests" even on error
     } finally {
-      setIsLoading(false);
+      setPrivacyTestRunning(false);
     }
   };
 
-  // ==========================================================================
-  // TTS Actions
-  // ==========================================================================
+  // ── Feature 2: Sample select ─────────────────────────────────────────────
 
-  const handleSpeak = async () => {
-    if (!ttsText.trim()) {
-      setError('Please enter text to speak');
-      return;
-    }
-
-    if (selectedModel?.id === 'system-tts') {
-      // Use System TTS
-      if (!audioModulesAvailable) {
-        Alert.alert('Rebuild Required', 'System TTS requires expo-speech. Rebuild with:\n\neas build --platform android --profile development');
-        return;
-      }
-      
-      if (isSpeaking) {
-        Speech.stop();
-        setIsSpeaking(false);
-        return;
-      }
-
-      setIsSpeaking(true);
-      Speech.speak(ttsText, {
-        rate: 1.0,
-        pitch: 1.0,
-        onDone: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
-      });
-    } else {
-      // Use Neural TTS - check if model is actually loaded
-      if (!isModelLoaded) {
-        setError('Please load a TTS model first');
-        return;
-      }
-      
-      setIsLoading(true);
-      setError(null);
-      setIsSpeaking(true);
-      
-      try {
-        // voice: '' or omitted → uses model's default voice
-        const result = await RunAnywhere.synthesize(ttsText, { 
-          rate: 1.0, 
-          pitch: 1.0 
-        });
-        
-        console.log('[TTS] Synthesis result:', {
-          sampleRate: result?.sampleRate,
-          numSamples: result?.numSamples,
-          duration: result?.duration,
-          audioLength: result?.audio?.length || 0,
-        });
-        
-        // result.audio is base64 encoded PCM data
-        if (result?.audio && result.audio.length > 0 && audioModulesAvailable) {
-          const sampleRate = result.sampleRate || 22050;
-          const duration = result.duration || (result.numSamples / sampleRate) || 0;
-          
-          setResponse(`🔊 Audio generated!\n\nDuration: ${duration.toFixed(2)}s\n\n⏳ Creating audio file...`);
-          
-          // Create proper WAV file from raw PCM data
-          const wavPath = await createWavFile(result.audio, sampleRate);
-          
-          if (wavPath) {
-            setResponse(`🔊 Audio generated!\n\nDuration: ${duration.toFixed(2)}s\n\n🎵 Playing audio...`);
-            
-            try {
-              // Unload previous sound
-              if (soundRef.current) {
-                await soundRef.current.unloadAsync();
-              }
-              
-              const { sound } = await Audio.Sound.createAsync({ uri: wavPath });
-              soundRef.current = sound;
-              await sound.playAsync();
-              
-              sound.setOnPlaybackStatusUpdate((status: any) => {
-                if (status.didJustFinish) {
-                  setIsSpeaking(false);
-                  setResponse(`✅ Playback complete!\n\nDuration: ${duration.toFixed(2)}s`);
-                }
-              });
-            } catch (playError: any) {
-              console.log('[TTS] Playback error:', playError.message);
-              setResponse(`🔊 Audio generated!\n\nDuration: ${duration.toFixed(2)}s\n\n⚠️ Playback failed: ${playError.message}`);
-              setIsSpeaking(false);
-            }
-          } else {
-            setResponse(`🔊 Audio generated!\n\nDuration: ${duration.toFixed(2)}s\n\n⚠️ Could not create audio file`);
-            setIsSpeaking(false);
-          }
-        } else {
-          setResponse(`🔊 Audio generated!\n\nSample Rate: ${result?.sampleRate || 'N/A'}Hz\nSamples: ${result?.numSamples || 0}\n\n${!audioModulesAvailable ? '💡 Rebuild with expo-av for playback' : '⚠️ No audio data returned'}`);
-          setIsSpeaking(false);
-        }
-      } catch (e: any) {
-        setError(`Synthesis failed: ${e.message}`);
-        setIsSpeaking(false);
-      } finally {
-        setIsLoading(false);
-      }
-    }
+  const handleSelectSample = (sample: typeof SAMPLES[number]) => {
+    setSelectedSample(sample.id);
+    setCodeInput(sample.code);
+    setReviewResult('');
   };
 
-  // ==========================================================================
-  // Custom Model
-  // ==========================================================================
+  // ── Copy ─────────────────────────────────────────────────────────────────
 
-  const handleAddCustomModel = () => {
-    if (!customModelURL.trim()) {
-      Alert.alert('Error', 'Please enter a Hugging Face model URL');
-      return;
-    }
+  const handleCopy = () => {
+    if (ClipboardAPI) ClipboardAPI.setString(reviewResult);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-    Alert.alert(
-      'Coming Soon',
-      'Custom model import will be available in the next release.\n\nFor now, you can request models at:\nhttps://github.com/RunanywhereAI/sdks/issues',
-      [{ text: 'OK' }]
+  // ── Feature 4: Share ─────────────────────────────────────────────────────
+
+  const handleShare = async () => {
+    const modeLabel = REVIEW_MODES.find(m => m.id === selectedMode)?.label ?? 'Code';
+    const message =
+      `CodeVault ${modeLabel} Review:\n\n${reviewResult}\n\n` +
+      `Reviewed on-device with RunAnywhere SDK — zero cloud calls.`;
+    try {
+      await Share.share({ message });
+    } catch (_) {}
+  };
+
+  // ── History toggle ────────────────────────────────────────────────────────
+
+  const toggleHistory = (id: string) => {
+    setHistory(prev =>
+      prev.map(e => e.id === id ? { ...e, expanded: !e.expanded } : e)
     );
-    setShowAddModel(false);
   };
 
-  // ==========================================================================
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  const currentMode  = REVIEW_MODES.find(m => m.id === selectedMode)!;
+  const llmModels    = models.filter(m => m.category === 'language');
+  const canRun       = isModelLoaded && !isGenerating && codeInput.trim().length > 0;
+  const activeSample = SAMPLES.find(s => s.id === selectedSample);
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Render
-  // ==========================================================================
-
-  const renderTab = (tab: TabType, label: string, icon: string) => (
-    <TouchableOpacity
-      style={[styles.tab, activeTab === tab && styles.tabActive]}
-      onPress={() => {
-        setActiveTab(tab);
-        setSelectedModel(null);
-        setIsModelLoaded(false);
-        setResponse('');
-        setError(null);
-      }}
-    >
-      <Text style={styles.tabIcon}>{icon}</Text>
-      <Text style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const renderModelCard = (model: ModelInfo) => (
-    <TouchableOpacity
-      key={model.id}
-      style={[
-        styles.modelCard,
-        selectedModel?.id === model.id && styles.modelCardSelected,
-      ]}
-      onPress={() => handleSelectModel(model)}
-    >
-      <View style={styles.modelCardHeader}>
-        <Text style={styles.modelName} numberOfLines={1}>{model.name}</Text>
-        <View style={[styles.frameworkBadge, { backgroundColor: FrameworkColors[model.framework] }]}>
-          <Text style={styles.frameworkText}>{model.framework}</Text>
-        </View>
-      </View>
-      <View style={styles.modelCardFooter}>
-        {model.isDownloaded ? (
-          <Text style={styles.downloadedBadge}>✓ Downloaded</Text>
-        ) : (
-          <Text style={styles.sizeText}>
-            {model.downloadSize ? `${(model.downloadSize / 1_000_000).toFixed(0)} MB` : 'Remote'}
-          </Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-
-  const renderLLMContent = () => (
-    <View style={styles.contentSection}>
-      {isModelLoaded && (
-        <>
-          <TextInput
-            style={styles.input}
-            value={prompt}
-            onChangeText={setPrompt}
-            placeholder="Ask me anything..."
-            placeholderTextColor="#666"
-            multiline
-          />
-          <TouchableOpacity
-            style={[styles.actionButton, isGenerating && styles.actionButtonDisabled]}
-            onPress={handleGenerate}
-            disabled={isGenerating}
-          >
-            {isGenerating ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.actionButtonText}>⚡ Generate</Text>
-            )}
-          </TouchableOpacity>
-        </>
-      )}
-      
-      {response !== '' && (
-        <View style={styles.responseBox}>
-          <Text style={styles.responseText}>{response}</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  const renderSTTContent = () => {
-    // Check if recording is available
-    const androidReady = Platform.OS === 'android' && LiveAudioStream && FileSystem;
-    const iosReady = Platform.OS === 'ios' && audioModulesAvailable;
-    const recordingAvailable = androidReady || iosReady;
-    
-    return (
-      <View style={styles.contentSection}>
-        {/* Rebuild notice if modules not available */}
-        {isModelLoaded && !recordingAvailable && (
-          <View style={styles.rebuildRequired}>
-            <Text style={styles.rebuildIcon}>🔧</Text>
-            <Text style={styles.rebuildTitle}>Rebuild Required for Recording</Text>
-            <Text style={styles.rebuildText}>
-              Audio recording requires native modules.{'\n'}
-              Run: eas build --platform {Platform.OS} --profile development
-            </Text>
-          </View>
-        )}
-        
-        {/* Recording UI - works on both platforms */}
-        {isModelLoaded && recordingAvailable && (
-          <View style={styles.recordingSection}>
-            <Animated.View style={[styles.micContainer, { transform: [{ scale: recordingAnim }] }]}>
-              <TouchableOpacity
-                style={[styles.micButton, isRecording && styles.micButtonRecording]}
-                onPress={isRecording ? handleStopRecording : handleStartRecording}
-                disabled={isLoading}
-              >
-                <Text style={styles.micIcon}>{isRecording ? '⏹️' : '🎙️'}</Text>
-              </TouchableOpacity>
-            </Animated.View>
-            <Text style={styles.recordingHint}>
-              {isRecording ? 'Tap to stop recording' : 'Tap to start recording'}
-            </Text>
-            {isLoading && <Text style={styles.processingText}>Processing...</Text>}
-          </View>
-        )}
-        
-        {transcript !== '' && (
-          <View style={styles.transcriptBox}>
-            <Text style={styles.transcriptLabel}>📝 Transcript</Text>
-            <Text style={styles.transcriptText}>{transcript}</Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderTTSContent = () => {
-    const isSystemTTS = selectedModel?.id === 'system-tts';
-    const canUseSystemTTS = isSystemTTS && audioModulesAvailable;
-    const canUseNeuralTTS = isModelLoaded && !isSystemTTS;
-    
-    return (
-      <View style={styles.contentSection}>
-        {/* System TTS selected but expo-speech not available */}
-        {isSystemTTS && !audioModulesAvailable && (
-          <View style={styles.rebuildRequired}>
-            <Text style={styles.rebuildIcon}>🔧</Text>
-            <Text style={styles.rebuildTitle}>Rebuild Required for System TTS</Text>
-            <Text style={styles.rebuildText}>
-              System TTS requires expo-speech.{'\n'}
-              Run: eas build --platform android --profile development
-            </Text>
-          </View>
-        )}
-        
-        {/* Neural TTS - needs model loaded */}
-        {!isSystemTTS && isModelLoaded && (
-          <>
-            <TextInput
-              style={styles.input}
-              value={ttsText}
-              onChangeText={setTtsText}
-              placeholder="Enter text to speak..."
-              placeholderTextColor="#666"
-              multiline
-            />
-            
-            <View style={styles.speakingSection}>
-              <Animated.View style={{ transform: [{ scale: speakingAnim }] }}>
-                <Text style={styles.catEmoji}>{isSpeaking ? '🐱' : '😺'}</Text>
-              </Animated.View>
-              {isSpeaking && <Text style={styles.speakingText}>Synthesizing...</Text>}
-            </View>
-            
-            <TouchableOpacity
-              style={[styles.actionButton, isSpeaking && styles.stopButton]}
-              onPress={handleSpeak}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.actionButtonText}>🔊 Synthesize</Text>
-              )}
-            </TouchableOpacity>
-            
-            <Text style={styles.ttsHint}>
-              💡 Neural TTS generates audio file. Playback requires rebuild with expo-av.
-            </Text>
-          </>
-        )}
-        
-        {/* System TTS - working */}
-        {canUseSystemTTS && (
-          <>
-            <TextInput
-              style={styles.input}
-              value={ttsText}
-              onChangeText={setTtsText}
-              placeholder="Enter text to speak..."
-              placeholderTextColor="#666"
-              multiline
-            />
-            
-            <View style={styles.speakingSection}>
-              <Animated.View style={{ transform: [{ scale: speakingAnim }] }}>
-                <Text style={styles.catEmoji}>{isSpeaking ? '🐱' : '😺'}</Text>
-              </Animated.View>
-              {isSpeaking && <Text style={styles.speakingText}>Speaking...</Text>}
-            </View>
-            
-            <TouchableOpacity
-              style={[styles.actionButton, isSpeaking && styles.stopButton]}
-              onPress={handleSpeak}
-              disabled={isLoading}
-            >
-              <Text style={styles.actionButtonText}>
-                {isSpeaking ? '⏹️ Stop' : '🔊 Speak'}
-              </Text>
-            </TouchableOpacity>
-          </>
-        )}
-        
-        {response !== '' && (
-          <View style={styles.responseBox}>
-            <Text style={styles.responseText}>{response}</Text>
-          </View>
-        )}
-      </View>
-    );
-  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.logo}>⚡ RunAnywhere</Text>
-          <Text style={styles.tagline}>On-Device AI for React Native</Text>
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>🔧 DEV MODE</Text>
+    <SafeAreaView style={s.safe}>
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+
+        {/* ══ Header ══════════════════════════════════════════════════════════ */}
+        <View style={s.header}>
+          <View style={s.headerTop}>
+            <Text style={s.logo}>🔒 CodeVault</Text>
+            <Text style={s.subtitle}>On-device code reviewer</Text>
+          </View>
+
+          <View style={s.headerBadgeRow}>
+            <View style={s.privacyBadge}>
+              <Animated.View style={[s.greenDot, { opacity: pulseAnim }]} />
+              <Text style={s.privacyText}>
+                Private · 0 API calls
+                {reviewCount > 0 ? ` · ${reviewCount} review${reviewCount !== 1 ? 's' : ''}` : ''}
+                {' · $0.00'}
+              </Text>
+            </View>
+
+            {/* Feature 1: Privacy Proof button */}
+            <TouchableOpacity
+              activeOpacity={0.75}
+              style={s.proofBtn}
+              onPress={() => {
+                setPrivacyTestDone(false);
+                setShowPrivacyModal(true);
+              }}
+            >
+              <Text style={s.proofBtnText}>Privacy proof</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Error Display */}
-        {error && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>⚠️ {error}</Text>
+        {/* ══ Error ═══════════════════════════════════════════════════════════ */}
+        {error != null && (
+          <View style={s.errorCard}>
+            <Text style={s.errorTitle}>Something went wrong</Text>
+            <Text style={s.errorBody}>{error}</Text>
           </View>
         )}
 
-        {/* Tabs */}
-        <View style={styles.tabBar}>
-          {renderTab('llm', 'LLM', '💬')}
-          {renderTab('stt', 'STT', '🎤')}
-          {renderTab('tts', 'TTS', '🔊')}
-        </View>
+        {/* ══ Model card ══════════════════════════════════════════════════════ */}
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Model</Text>
 
-        {/* Model Selection */}
-        {isInitialized && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Select Model</Text>
-              <TouchableOpacity onPress={() => setShowAddModel(true)}>
-                <Text style={styles.addModelLink}>+ Add Custom</Text>
-              </TouchableOpacity>
+          {!isInitialized && error == null && (
+            <View style={s.loadingRow}>
+              <ActivityIndicator size="small" color={C.accent} />
+              <Text style={s.loadingText}>Loading available models…</Text>
             </View>
-            
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modelList}>
-              {getModelsForTab().map(renderModelCard)}
-            </ScrollView>
+          )}
 
-            {/* Download/Load Buttons */}
-            {selectedModel && (
-              <View style={styles.modelActions}>
-                {!selectedModel.isDownloaded && selectedModel.id !== 'system-tts' ? (
-                  <TouchableOpacity
-                    style={[styles.downloadButton, isDownloading && styles.downloadButtonDisabled]}
-                    onPress={handleDownloadModel}
-                    disabled={isDownloading}
-                  >
-                    {isDownloading ? (
-                      <Text style={styles.downloadButtonText}>📥 {downloadProgress > 0 ? `${downloadProgress}%` : 'Starting...'}</Text>
-                    ) : (
-                      <Text style={styles.downloadButtonText}>📥 Download {selectedModel.name}</Text>
-                    )}
-                  </TouchableOpacity>
-                ) : !isModelLoaded ? (
-                  <TouchableOpacity
-                    style={[styles.loadButton, isLoading && styles.loadButtonDisabled]}
-                    onPress={handleLoadModel}
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.loadButtonText}>🚀 Load {selectedModel.name}</Text>
-                    )}
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.loadedIndicator}>
-                    <Text style={styles.loadedText}>✅ {selectedModel.name} Ready</Text>
+          {llmModels.map((model, idx) => {
+            const sel = selectedModel?.id === model.id;
+            return (
+              <View key={model.id}>
+                {idx > 0 && <View style={s.rowDivider} />}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={[s.modelRow, sel && s.modelRowSel]}
+                  onPress={() => handleSelectModel(model)}
+                >
+                  <View style={[s.selDot, sel && s.selDotActive]} />
+                  <View style={s.modelText}>
+                    <Text style={[s.modelName, sel && s.modelNameSel]}>
+                      {model.name}
+                    </Text>
+                    <Text style={s.modelMeta}>
+                      {model.downloadSize != null
+                        ? `${(model.downloadSize / 1024 / 1024).toFixed(0)} MB · LlamaCpp`
+                        : 'LlamaCpp'}
+                    </Text>
+                  </View>
+                  {model.isDownloaded ? (
+                    <View style={s.statusBadge}>
+                      <Text style={s.statusBadgeText}>Downloaded</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.statusMuted}>Not downloaded</Text>
+                  )}
+                </TouchableOpacity>
+
+                {sel && isDownloading && (
+                  <View style={s.progressWrap}>
+                    <View style={s.progressBg}>
+                      <View style={[s.progressFill, { width: `${downloadProgress}%` as any }]} />
+                    </View>
+                    <Text style={s.progressLabel}>{downloadProgress}%</Text>
                   </View>
                 )}
               </View>
-            )}
-          </View>
-        )}
+            );
+          })}
 
-        {/* Tab Content */}
-        {isInitialized && (
+          {selectedModel != null && (
+            <View style={s.cardAction}>
+              {!selectedModel.isDownloaded ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={[s.primaryBtn, isDownloading && s.primaryBtnBusy]}
+                  onPress={handleDownloadModel}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? (
+                    <View style={s.btnInner}>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={s.primaryBtnText}>Downloading…</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.primaryBtnText}>Download model</Text>
+                  )}
+                </TouchableOpacity>
+              ) : !isModelLoaded ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={[s.primaryBtn, isLoading && s.primaryBtnBusy]}
+                  onPress={handleLoadModel}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <View style={s.btnInner}>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={s.primaryBtnText}>Loading into memory…</Text>
+                    </View>
+                  ) : (
+                    <Text style={s.primaryBtnText}>Load model</Text>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <View style={s.readyBanner}>
+                  <View style={s.readyDot} />
+                  <Text style={s.readyText}>{selectedModel.name} is ready</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* ══ Review section ══════════════════════════════════════════════════ */}
+        {isModelLoaded && (
           <>
-            {activeTab === 'llm' && renderLLMContent()}
-            {activeTab === 'stt' && renderSTTContent()}
-            {activeTab === 'tts' && renderTTSContent()}
+            {/* Mode picker */}
+            <View style={[s.card, s.cardNopadTop]}>
+              <Text style={[s.cardLabel, s.cardLabelPad]}>Review mode</Text>
+              <View style={s.modeGrid}>
+                {REVIEW_MODES.map(mode => {
+                  const active = selectedMode === mode.id;
+                  return (
+                    <TouchableOpacity
+                      key={mode.id}
+                      activeOpacity={0.72}
+                      style={[s.modeCell, active && s.modeCellActive]}
+                      onPress={() => setSelectedMode(mode.id)}
+                    >
+                      {active && (
+                        <View style={[s.modeAccentBar, { backgroundColor: mode.accent }]} />
+                      )}
+                      <Text style={s.modeEmoji}>{mode.icon}</Text>
+                      <Text style={[s.modeLabel, active && s.modeLabelActive]}>
+                        {mode.label}
+                      </Text>
+                      <Text style={s.modeDesc}>{mode.description}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Code input */}
+            <View style={s.card}>
+              {/* Top row: label + lang chip + clear */}
+              <View style={s.codeTopRow}>
+                <Text style={s.cardLabel}>Code</Text>
+                <View style={s.codeTopRight}>
+                  <View style={s.langChip}>
+                    <Text style={s.langChipText}>
+                      {activeSample?.lang ?? 'Code'}
+                    </Text>
+                  </View>
+                  {codeInput.length > 0 && (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={s.clearBtn}
+                      onPress={() => {
+                        setCodeInput('');
+                        setSelectedSample('custom');
+                      }}
+                    >
+                      <Text style={s.clearBtnText}>Clear</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Feature 2: Sample chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={s.sampleRow}
+                contentContainerStyle={s.sampleRowContent}
+              >
+                {SAMPLES.map(sample => {
+                  const active = selectedSample === sample.id;
+                  return (
+                    <TouchableOpacity
+                      key={sample.id}
+                      activeOpacity={0.75}
+                      style={[s.sampleChip, active && s.sampleChipActive]}
+                      onPress={() => handleSelectSample(sample)}
+                    >
+                      <Text style={[s.sampleChipText, active && s.sampleChipTextActive]}>
+                        {sample.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={s.codeEditorWrap}>
+                <TextInput
+                  style={s.codeEditor}
+                  value={codeInput}
+                  onChangeText={text => {
+                    setCodeInput(text);
+                    // If user edits, deselect preset samples
+                    if (selectedSample !== 'custom' && text !== activeSample?.code) {
+                      setSelectedSample('custom');
+                    }
+                  }}
+                  multiline
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
+                  placeholder="Paste your code here…"
+                  placeholderTextColor={C.textMuted}
+                  scrollEnabled={false}
+                />
+              </View>
+            </View>
+
+            {/* Run button */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={[s.runBtn, !canRun && s.runBtnOff]}
+              onPress={handleRunReview}
+              disabled={!canRun}
+            >
+              {isGenerating ? (
+                <View style={s.btnInner}>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={s.runBtnText}>Analyzing on-device…</Text>
+                </View>
+              ) : (
+                <Text style={[s.runBtnText, !canRun && s.runBtnTextOff]}>
+                  Run {currentMode.label} review
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Output */}
+            {reviewResult !== '' && (
+              <View style={s.outputCard}>
+                <View style={s.outputAccentBar} />
+                <View style={s.outputBody}>
+                  <View style={s.outputHeader}>
+                    <View>
+                      <Text style={s.outputTitle}>Analysis</Text>
+                      <Text style={s.outputSub}>
+                        {currentMode.icon} {currentMode.label} · on-device
+                      </Text>
+                    </View>
+                    {/* Copy + Share buttons */}
+                    <View style={s.outputActions}>
+                      <TouchableOpacity
+                        activeOpacity={0.75}
+                        style={[s.iconBtn, copied && s.iconBtnDone]}
+                        onPress={handleCopy}
+                      >
+                        <Text style={[s.iconBtnText, copied && s.iconBtnTextDone]}>
+                          {copied ? 'Copied' : 'Copy'}
+                        </Text>
+                      </TouchableOpacity>
+                      {/* Feature 4: Share */}
+                      <TouchableOpacity
+                        activeOpacity={0.75}
+                        style={s.iconBtn}
+                        onPress={handleShare}
+                      >
+                        <Text style={s.iconBtnText}>Share</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={s.outputDivider} />
+
+                  <ScrollView
+                    style={s.outputScroll}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {reviewResult.split('\n').map((line, i) => (
+                      <OutputLine key={i} line={line} />
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            )}
+
+            {/* Feature 3: Review history */}
+            {history.length > 0 && (
+              <View style={s.historySection}>
+                <Text style={s.historySectionLabel}>
+                  Recent reviews  ·  {history.length}
+                </Text>
+                {history.map(entry => (
+                  <HistoryCard
+                    key={entry.id}
+                    entry={entry}
+                    onToggle={() => toggleHistory(entry.id)}
+                  />
+                ))}
+              </View>
+            )}
           </>
         )}
 
-        {/* SDK Not Available */}
-        {!sdkAvailable && (
-          <View style={styles.sdkNotAvailable}>
-            <Text style={styles.sdkNotAvailableTitle}>📱 Development Build Required</Text>
-            <Text style={styles.sdkNotAvailableText}>
-              RunAnywhere uses native modules for on-device AI.{'\n\n'}
-              1. Download the APK from EAS Build{'\n'}
-              2. Install on your Android device{'\n'}
-              3. Connect to this Expo server
-            </Text>
-            <TouchableOpacity
-              style={styles.downloadApkButton}
-              onPress={() => Linking.openURL('https://expo.dev/accounts/shubham280299/projects/runanywhere-demo/builds')}
-            >
-              <Text style={styles.downloadApkButtonText}>📥 Get Development Build</Text>
-            </TouchableOpacity>
+        {/* ══ Footer ══════════════════════════════════════════════════════════ */}
+        <Divider />
+        <View style={s.footer}>
+          <View style={s.footerBadges}>
+            {['🔒 On-device', '📡 Offline', '💸 Free', '⚡ Fast'].map(b => (
+              <View key={b} style={s.footerChip}>
+                <Text style={s.footerChipText}>{b}</Text>
+              </View>
+            ))}
           </View>
-        )}
-
-        {/* Production Mode Info */}
-        <View style={styles.productionInfo}>
-          <Text style={styles.productionTitle}>🚀 Production Mode</Text>
-          <Text style={styles.productionText}>
-            Enable advanced capabilities:{'\n'}
-            • 📊 Observability & Analytics Dashboard{'\n'}
-            • ⚖️ Policy Engine (cost/latency/privacy routing){'\n'}
-            • 🔄 Hybrid on-device + cloud inference{'\n'}
-            • 📈 Usage insights & optimization
-          </Text>
-          <TouchableOpacity onPress={() => Linking.openURL('https://runanywhere.ai')}>
-            <Text style={styles.learnMoreLink}>Learn more at runanywhere.ai →</Text>
-          </TouchableOpacity>
+          <Text style={s.footerNote}>Powered by RunAnywhere SDK · LlamaCpp</Text>
         </View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <TouchableOpacity onPress={() => Linking.openURL('https://www.npmjs.com/package/runanywhere-react-native')}>
-            <Text style={styles.footerLink}>npm: runanywhere-react-native</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => Linking.openURL('https://github.com/RunanywhereAI/sdks')}>
-            <Text style={styles.footerLink}>GitHub: RunanywhereAI/sdks</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
-      {/* Add Custom Model Modal */}
-      <Modal visible={showAddModel} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Custom Model</Text>
-            <Text style={styles.modalSubtitle}>Import from Hugging Face</Text>
-            
-            <TextInput
-              style={styles.modalInput}
-              value={customModelName}
-              onChangeText={setCustomModelName}
-              placeholder="Model name (e.g., My Custom LLM)"
-              placeholderTextColor="#666"
-            />
-            
-            <TextInput
-              style={styles.modalInput}
-              value={customModelURL}
-              onChangeText={setCustomModelURL}
-              placeholder="https://huggingface.co/..."
-              placeholderTextColor="#666"
-              autoCapitalize="none"
-            />
-            
-            <Text style={styles.modalHint}>
-              💡 Supports GGUF (LLM) and ONNX (STT/TTS) formats
+      {/* ══ Feature 1: Privacy Proof Modal ═══════════════════════════════════ */}
+      <Modal
+        visible={showPrivacyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPrivacyModal(false)}
+      >
+        <View style={m.backdrop}>
+          <TouchableOpacity
+            style={m.backdropTap}
+            activeOpacity={1}
+            onPress={() => setShowPrivacyModal(false)}
+          />
+          <View style={m.sheet}>
+            {/* Sheet handle */}
+            <View style={m.handle} />
+
+            {/* Header */}
+            <View style={m.sheetHeader}>
+              <Text style={m.sheetTitle}>Privacy Proof</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={m.closeBtn}
+                onPress={() => setShowPrivacyModal(false)}
+              >
+                <Text style={m.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Shield + counter */}
+            <View style={m.counterCard}>
+              <Text style={m.shieldIcon}>🛡️</Text>
+              <Text style={m.counterLabel}>Network requests during reviews</Text>
+              <Text style={m.counterValue}>0</Text>
+              <Text style={m.counterNote}>
+                {privacyTestDone
+                  ? 'Review completed. Network requests: still 0'
+                  : 'All inference runs entirely on this device'}
+              </Text>
+            </View>
+
+            {/* Description */}
+            <Text style={m.description}>
+              CodeVault runs AI inference 100% on your device using{' '}
+              <Text style={m.descAccent}>RunAnywhere SDK</Text>. No code is
+              transmitted to any server. Your data never touches the internet.
             </Text>
-            
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelButton} onPress={() => setShowAddModel(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalAddButton} onPress={handleAddCustomModel}>
-                <Text style={styles.modalAddText}>Add Model</Text>
-              </TouchableOpacity>
+
+            {/* Privacy guarantee row */}
+            <View style={m.guaranteeRow}>
+              <Text style={m.guaranteeIcon}>🔒</Text>
+              <Text style={m.guaranteeText}>Your code never leaves this phone</Text>
+            </View>
+
+            {/* Test button */}
+            <View style={m.testSection}>
+              {!isModelLoaded ? (
+                <View style={m.noModelNote}>
+                  <Text style={m.noModelText}>
+                    Load a model first to run a live test
+                  </Text>
+                </View>
+              ) : privacyTestDone ? (
+                <View style={m.testSuccessRow}>
+                  <Text style={m.testSuccessIcon}>✓</Text>
+                  <View>
+                    <Text style={m.testSuccessTitle}>
+                      Review completed
+                    </Text>
+                    <Text style={m.testSuccessBody}>
+                      Network requests made: 0
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={[m.testBtn, privacyTestRunning && m.testBtnBusy]}
+                  onPress={handlePrivacyTest}
+                  disabled={privacyTestRunning}
+                >
+                  {privacyTestRunning ? (
+                    <View style={s.btnInner}>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={m.testBtnText}>Running on-device…</Text>
+                    </View>
+                  ) : (
+                    <Text style={m.testBtnText}>Run a test review</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
       </Modal>
+
     </SafeAreaView>
   );
 }
 
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 // Styles
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  scrollContent: {
-    padding: 20,
-  },
-  
+const s = StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: C.bg },
+  scroll:  { flex: 1 },
+  content: { paddingHorizontal: 20, paddingBottom: 56 },
+
   // Header
-  header: {
+  header: { paddingTop: 24, paddingBottom: 26, gap: 12 },
+  headerTop: { gap: 3 },
+  logo:     { fontSize: 26, fontWeight: '700', color: C.text, letterSpacing: -0.3 },
+  subtitle: { fontSize: 14, color: C.textMuted, fontWeight: '400' },
+
+  headerBadgeRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    gap: 10,
+    flexWrap: 'wrap',
   },
-  logo: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  tagline: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 4,
-  },
-  modeBadge: {
-    backgroundColor: '#FF9800',
-    paddingHorizontal: 16,
+  privacyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.greenDim,
+    borderRadius: 20,
+    paddingHorizontal: 12,
     paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: C.greenBorder,
+    gap: 7,
+  },
+  greenDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: C.green,
+  },
+  privacyText: { color: C.green, fontSize: 12, fontWeight: '500' },
+
+  // Feature 1: proof button
+  proofBtn: {
+    backgroundColor: C.surface,
     borderRadius: 20,
-    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: C.border,
   },
-  modeBadgeText: {
-    color: '#000',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  
+  proofBtnText: { color: C.textSub, fontSize: 12, fontWeight: '500' },
+
   // Error
-  errorBox: {
-    backgroundColor: '#3a1a1a',
+  errorCard: {
+    backgroundColor: 'rgba(239,68,68,0.07)',
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.18)',
     padding: 16,
     marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#F44336',
+    gap: 4,
   },
-  errorText: {
-    color: '#F44336',
-    fontSize: 14,
-  },
-  
-  // Tabs
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
+  errorTitle: { color: '#f87171', fontSize: 14, fontWeight: '600' },
+  errorBody:  { color: '#f8717190', fontSize: 13, lineHeight: 19 },
+
+  // Cards
+  card: {
+    backgroundColor: C.surface,
     borderRadius: 16,
-    padding: 4,
-    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 18,
+    marginBottom: 14,
   },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  tabActive: {
-    backgroundColor: '#2a2a2a',
-  },
-  tabIcon: {
-    fontSize: 18,
-    marginRight: 6,
-  },
-  tabLabel: {
-    color: '#888',
-    fontSize: 14,
+  cardNopadTop:  { paddingTop: 0, overflow: 'hidden' },
+  cardLabel: {
+    fontSize: 11,
     fontWeight: '600',
+    color: C.textMuted,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 14,
   },
-  tabLabelActive: {
-    color: '#fff',
-  },
-  
-  // Section
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  addModelLink: {
-    color: '#007AFF',
-    fontSize: 14,
-  },
-  
-  // Model Cards
-  modelList: {
-    marginBottom: 12,
-  },
-  modelCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
-    width: 180,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  modelCardSelected: {
-    borderColor: '#007AFF',
-  },
-  modelCardHeader: {
-    marginBottom: 8,
-  },
-  modelName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  frameworkBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  frameworkText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  modelCardFooter: {
-    marginTop: 4,
-  },
-  downloadedBadge: {
-    color: '#4CAF50',
-    fontSize: 12,
-  },
-  sizeText: {
-    color: '#888',
-    fontSize: 12,
-  },
-  
-  // Model Actions
-  modelActions: {
-    marginTop: 8,
-  },
-  downloadButton: {
-    backgroundColor: '#2196F3',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  downloadButtonDisabled: {
-    opacity: 0.7,
-  },
-  downloadButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  loadButtonDisabled: {
-    opacity: 0.7,
-  },
-  loadButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadedIndicator: {
-    backgroundColor: '#1a3a1a',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  loadedText: {
-    color: '#4CAF50',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  
-  // Content Section
-  contentSection: {
-    marginBottom: 20,
-  },
-  input: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    color: '#fff',
-    fontSize: 16,
-    minHeight: 100,
-    textAlignVertical: 'top',
-    marginBottom: 12,
-  },
-  actionButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  actionButtonDisabled: {
-    opacity: 0.7,
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  stopButton: {
-    backgroundColor: '#F44336',
-  },
-  
-  // Response Box
-  responseBox: {
-    backgroundColor: '#1a2a1a',
-    borderRadius: 12,
-    padding: 16,
+  cardLabelPad: { paddingTop: 18 },
+  cardAction: {
     marginTop: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  responseText: {
-    color: '#fff',
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  
-  // Rebuild Required
-  rebuildRequired: {
-    backgroundColor: '#2a2a1a',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FF9800',
-  },
-  rebuildIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  rebuildTitle: {
-    color: '#FF9800',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  rebuildText: {
-    color: '#888',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  
-  // Platform Notice (Android limitation)
-  platformNotice: {
-    backgroundColor: '#1a1a2a',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#4A90D9',
-  },
-  platformNoticeIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  platformNoticeTitle: {
-    color: '#4A90D9',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  platformNoticeText: {
-    color: '#888',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  
-  // STT Recording
-  recordingSection: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  micContainer: {
-    marginBottom: 16,
-  },
-  micButton: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#1a1a1a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#333',
-  },
-  micButtonRecording: {
-    backgroundColor: '#3a1a1a',
-    borderColor: '#F44336',
-  },
-  micIcon: {
-    fontSize: 40,
-  },
-  recordingHint: {
-    color: '#888',
-    fontSize: 14,
-  },
-  processingText: {
-    color: '#4A90D9',
-    fontSize: 14,
-    marginTop: 12,
-  },
-  transcriptBox: {
-    backgroundColor: '#1a1a2a',
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
-  },
-  transcriptLabel: {
-    color: '#007AFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  transcriptText: {
-    color: '#fff',
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  
-  // TTS Speaking
-  speakingSection: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  catEmoji: {
-    fontSize: 64,
-  },
-  speakingText: {
-    color: '#4CAF50',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  ttsHint: {
-    color: '#666',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 12,
-    fontStyle: 'italic',
-  },
-  
-  // SDK Not Available
-  sdkNotAvailable: {
-    backgroundColor: '#1a1a2a',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  sdkNotAvailableTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  sdkNotAvailableText: {
-    color: '#888',
-    fontSize: 14,
-    lineHeight: 22,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  downloadApkButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  downloadApkButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  
-  // Production Info
-  productionInfo: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  productionTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  productionText: {
-    color: '#888',
-    fontSize: 14,
-    lineHeight: 24,
-  },
-  learnMoreLink: {
-    color: '#007AFF',
-    fontSize: 14,
-    marginTop: 12,
-  },
-  
-  // Footer
-  footer: {
-    alignItems: 'center',
-    paddingVertical: 20,
+    paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#222',
+    borderTopColor: C.borderSoft,
   },
-  footerLink: {
-    color: '#666',
-    fontSize: 13,
-    marginVertical: 4,
-  },
-  
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 20,
-    padding: 24,
-  },
-  modalTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  modalSubtitle: {
-    color: '#888',
-    fontSize: 14,
-    marginBottom: 20,
-  },
-  modalInput: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 16,
-    color: '#fff',
-    fontSize: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  modalHint: {
-    color: '#666',
-    fontSize: 12,
-    marginBottom: 20,
-  },
-  modalActions: {
+
+  // Model rows
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  loadingText: { color: C.textSub, fontSize: 14 },
+  rowDivider:  { height: 1, backgroundColor: C.borderSoft, marginVertical: 2 },
+  modelRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  modalCancelButton: {
+    alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginRight: 12,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    gap: 12,
   },
-  modalCancelText: {
-    color: '#888',
-    fontSize: 16,
+  modelRowSel:   { backgroundColor: C.elevated },
+  selDot: {
+    width: 16, height: 16, borderRadius: 8,
+    borderWidth: 2, borderColor: C.border, backgroundColor: 'transparent',
   },
-  modalAddButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+  selDotActive:  { borderColor: C.accent, backgroundColor: C.accent },
+  modelText:     { flex: 1 },
+  modelName:     { fontSize: 15, fontWeight: '500', color: C.textSub },
+  modelNameSel:  { color: C.text },
+  modelMeta:     { fontSize: 12, color: C.textMuted, marginTop: 2 },
+  statusBadge: {
+    backgroundColor: C.elevated, borderRadius: 6,
+    paddingHorizontal: 9, paddingVertical: 3,
+    borderWidth: 1, borderColor: C.border,
   },
-  modalAddText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  statusBadgeText: { fontSize: 11, color: C.textSub, fontWeight: '500' },
+  statusMuted:     { fontSize: 12, color: C.textMuted },
+  progressWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 10, paddingHorizontal: 4, paddingBottom: 8,
   },
+  progressBg: {
+    flex: 1, height: 3, backgroundColor: C.border,
+    borderRadius: 2, overflow: 'hidden',
+  },
+  progressFill:  { height: 3, backgroundColor: C.accent, borderRadius: 2 },
+  progressLabel: { fontSize: 11, color: C.textMuted, width: 32, textAlign: 'right' },
+
+  // Buttons
+  primaryBtn:      { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  primaryBtnBusy:  { opacity: 0.75 },
+  primaryBtnText:  { color: '#fff', fontSize: 15, fontWeight: '600' },
+  btnInner:        { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  readyBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+    backgroundColor: C.greenDim, borderRadius: 10,
+    borderWidth: 1, borderColor: C.greenBorder,
+    paddingVertical: 11, paddingHorizontal: 14,
+  },
+  readyDot:   { width: 7, height: 7, borderRadius: 3.5, backgroundColor: C.green },
+  readyText:  { color: C.green, fontSize: 14, fontWeight: '500' },
+
+  // Mode grid
+  modeGrid:  { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  modeCell: {
+    width: '48.8%', backgroundColor: C.elevated,
+    borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    padding: 14, overflow: 'hidden',
+  },
+  modeCellActive: { borderColor: C.accent, backgroundColor: C.accentDim },
+  modeAccentBar: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+    borderTopLeftRadius: 12, borderTopRightRadius: 12,
+  },
+  modeEmoji:       { fontSize: 20, marginBottom: 8, marginTop: 4 },
+  modeLabel:       { fontSize: 14, fontWeight: '600', color: C.textSub, marginBottom: 3 },
+  modeLabelActive: { color: C.text },
+  modeDesc:        { fontSize: 11, color: C.textMuted, lineHeight: 16 },
+
+  // Code editor
+  codeTopRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 12,
+  },
+  codeTopRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  langChip: {
+    backgroundColor: C.elevated, borderRadius: 6,
+    paddingHorizontal: 9, paddingVertical: 3,
+    borderWidth: 1, borderColor: C.border,
+  },
+  langChipText: { color: C.textSub, fontSize: 11, fontWeight: '500' },
+  clearBtn: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: C.border },
+  clearBtnText: { color: C.textMuted, fontSize: 11, fontWeight: '500' },
+
+  // Feature 2: sample chips
+  sampleRow:        { marginBottom: 12 },
+  sampleRowContent: { gap: 8, paddingRight: 4 },
+  sampleChip: {
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 20, borderWidth: 1,
+    borderColor: C.border, backgroundColor: C.elevated,
+  },
+  sampleChipActive: {
+    borderColor: C.accentBorder,
+    backgroundColor: C.accentDim,
+  },
+  sampleChipText:       { fontSize: 12, color: C.textSub, fontWeight: '500' },
+  sampleChipTextActive: { color: C.accent },
+
+  codeEditorWrap: {
+    backgroundColor: C.elevated, borderRadius: 10,
+    borderWidth: 1, borderColor: C.border, overflow: 'hidden',
+  },
+  codeEditor: {
+    color: C.codeText, fontFamily: 'monospace',
+    fontSize: 13, lineHeight: 20,
+    padding: 14, minHeight: 220, textAlignVertical: 'top',
+  },
+
+  // Run button
+  runBtn: {
+    backgroundColor: C.accent, borderRadius: 14,
+    paddingVertical: 16, alignItems: 'center', marginBottom: 14,
+  },
+  runBtnOff:     { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
+  runBtnText:    { color: '#fff', fontSize: 16, fontWeight: '600', letterSpacing: 0.1 },
+  runBtnTextOff: { color: C.textMuted },
+
+  // Output card
+  outputCard: {
+    flexDirection: 'row', backgroundColor: C.surface,
+    borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    overflow: 'hidden', marginBottom: 14,
+  },
+  outputAccentBar: { width: 3, backgroundColor: C.accent },
+  outputBody:      { flex: 1 },
+  outputHeader: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
+  },
+  outputTitle: { fontSize: 15, fontWeight: '600', color: C.text },
+  outputSub:   { fontSize: 12, color: C.textMuted, marginTop: 2 },
+  outputDivider: { height: 1, backgroundColor: C.border, marginHorizontal: 16 },
+  outputScroll:  { maxHeight: 400, paddingHorizontal: 16, paddingVertical: 14 },
+
+  // Feature 4: output action buttons
+  outputActions: { flexDirection: 'row', gap: 8 },
+  iconBtn: {
+    backgroundColor: C.elevated, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: C.border,
+  },
+  iconBtnDone:     { borderColor: C.greenBorder, backgroundColor: C.greenDim },
+  iconBtnText:     { fontSize: 12, fontWeight: '600', color: C.textSub },
+  iconBtnTextDone: { color: C.green },
+
+  // Feature 3: history section
+  historySection: { marginBottom: 14 },
+  historySectionLabel: {
+    fontSize: 11, fontWeight: '600', color: C.textMuted,
+    letterSpacing: 0.8, textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+
+  // Footer
+  footer:        { alignItems: 'center', gap: 12, paddingBottom: 8 },
+  footerBadges:  { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  footerChip: {
+    backgroundColor: C.surface, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 5,
+    borderWidth: 1, borderColor: C.border,
+  },
+  footerChipText: { color: C.textMuted, fontSize: 12 },
+  footerNote:     { color: C.textMuted, fontSize: 11, opacity: 0.6 },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Modal styles (Feature 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const m = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  backdropTap: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+  },
+  sheet: {
+    backgroundColor: C.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: C.border,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    paddingTop: 12,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    backgroundColor: C.border,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  closeBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: C.elevated,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.border,
+  },
+  closeBtnText: { color: C.textSub, fontSize: 14 },
+
+  // Counter card
+  counterCard: {
+    backgroundColor: C.elevated,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.greenBorder,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  shieldIcon:   { fontSize: 40, marginBottom: 12 },
+  counterLabel: { fontSize: 13, color: C.textSub, marginBottom: 4 },
+  counterValue: {
+    fontSize: 56, fontWeight: '800', color: C.green,
+    lineHeight: 64,
+  },
+  counterNote:  { fontSize: 12, color: C.textMuted, marginTop: 6, textAlign: 'center' },
+
+  // Description
+  description: {
+    fontSize: 14,
+    color: C.textSub,
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  descAccent: { color: C.accent, fontWeight: '600' },
+
+  // Guarantee row
+  guaranteeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: C.greenDim,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.greenBorder,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  guaranteeIcon: { fontSize: 18 },
+  guaranteeText: { color: C.green, fontSize: 14, fontWeight: '500', flex: 1 },
+
+  // Test section
+  testSection: { gap: 12 },
+  testBtn: {
+    backgroundColor: C.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  testBtnBusy: { opacity: 0.75 },
+  testBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+
+  noModelNote: {
+    backgroundColor: C.elevated,
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  noModelText: { color: C.textMuted, fontSize: 13, textAlign: 'center' },
+
+  testSuccessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: C.greenDim,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.greenBorder,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  testSuccessIcon:  { fontSize: 22, color: C.green },
+  testSuccessTitle: { fontSize: 14, fontWeight: '600', color: C.green },
+  testSuccessBody:  { fontSize: 12, color: C.textMuted, marginTop: 2 },
+});

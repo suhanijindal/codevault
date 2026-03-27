@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "RunAnywhere Demo",
-    "slug": "runanywhere-demo",
+    "name": "CodeVault",
+    "slug": "codevault",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -66,9 +66,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "76085e19-fbf0-4cfb-a0ed-9553fe5432ca"
+        "projectId": "33f5e2d3-da6c-463e-8839-910d6e4a511f"
       }
     },
-    "owner": "shubham280299"
+    "owner": "su_hanijindal"
   }
 }
