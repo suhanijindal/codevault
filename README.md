@@ -1,6 +1,6 @@
-# 🔒 CodeVault — On-Device AI Code Reviewer
+# CodeVault — On-Device AI Code Reviewer
 
-> **Built for the GPT Challenge Hackathon by Singularity × RunAnywhere**
+> **Built for the GPT Challenge Hackathon by Singularity x RunAnywhere**
 
 CodeVault is a mobile AI code reviewer that runs **100% on your device** — no internet, no API calls, no cost per review. Paste your code, pick a review mode, and get a detailed security/quality analysis powered by a local LLM.
 
@@ -10,10 +10,10 @@ CodeVault is a mobile AI code reviewer that runs **100% on your device** — no 
 
 Every existing AI code reviewer (GitHub Copilot, Claude, GPT-4) sends your code to a remote server. That means:
 
-- 🚨 **Your proprietary code leaves your device**
-- 💸 **You pay per API call** — costs add up fast
-- 📡 **You need internet** — useless offline or on a plane
-- ⏱️ **Latency** — round-trips to cloud add seconds of delay
+- **Your proprietary code leaves your device**
+- **You pay per API call** — costs add up fast
+- **You need internet** — useless offline or on a plane
+- **Latency** — round-trips to cloud add seconds of delay
 
 CodeVault eliminates all four problems by running inference directly on the phone.
 
@@ -23,28 +23,28 @@ CodeVault eliminates all four problems by running inference directly on the phon
 
 | Feature | Description |
 |---|---|
-| 🛡️ **Security Review** | Finds SQL injection, XSS, hardcoded secrets, and other OWASP vulnerabilities |
-| 🐛 **Bug Detection** | Spots logic errors, unhandled edge cases, and off-by-one mistakes |
-| ✨ **Quality Analysis** | Readability, performance, and maintainability suggestions |
-| 📖 **Code Explainer** | Line-by-line walkthrough for onboarding or code review |
-| 🔒 **Privacy Proof** | Live demo showing 0 network requests made during inference |
-| 📋 **Review History** | Last 5 reviews saved locally, collapsible, with full output |
-| 📤 **Share Review** | Export any review as formatted text via the native share sheet |
+| **Security Review** | Finds SQL injection, XSS, hardcoded secrets, and other OWASP vulnerabilities |
+| **Bug Detection** | Spots logic errors, unhandled edge cases, and off-by-one mistakes |
+| **Quality Analysis** | Readability, performance, and maintainability suggestions |
+| **Code Explainer** | Line-by-line walkthrough for onboarding or code review |
+| **Privacy Proof** | Live demo showing 0 network requests made during inference |
+| **Review History** | Last 5 reviews saved locally, collapsible, with full output |
+| **Share Review** | Export any review as formatted text via the native share sheet |
 
 ---
 
 ## On-Device AI Benefits
 
-### 🔒 Complete Privacy
+### Complete Privacy
 Your source code never leaves the device. No logs, no telemetry, no training data. Verified by the in-app Privacy Proof screen — it shows a live network request counter that stays at **0** even after running a full review.
 
-### 💸 Zero Cost Per Review
+### Zero Cost Per Review
 No API key. No monthly bill. No per-token pricing. Download the model once (~1–4 GB), and every review after that is free forever.
 
-### ⚡ Low Latency
+### Low Latency
 No round-trip to a cloud server. Inference runs on the device's NPU/GPU via LlamaCpp, giving fast responses without waiting on a network.
 
-### 📡 Works Fully Offline
+### Works Fully Offline
 No WiFi, no cellular, no problem. Works on a plane, in a basement, at a conference with bad reception — anywhere.
 
 ---
@@ -68,7 +68,7 @@ No WiFi, no cellular, no problem. Works on a plane, in a basement, at a conferen
 
 1. Download the latest APK:
 
-   **[⬇ Download CodeVault APK](#)** ← *(replace with EAS build link)*
+   **[Download CodeVault APK](#)** *(replace with EAS build link)*
 
 2. On your Android device: **Settings → Install unknown apps** → allow your browser/file manager.
 
@@ -131,17 +131,17 @@ Run a Security review on any of these to see CodeVault catch the issues — all 
 
 ```
 User pastes code
-      ↓
+      |
 Selects review mode (Security / Bugs / Quality / Explain)
-      ↓
+      |
 CodeVault builds a structured prompt
-      ↓
+      |
 RunAnywhere SDK passes prompt to local LlamaCpp runtime
-      ↓
+      |
 GGUF model runs inference on-device (NPU/GPU)
-      ↓
+      |
 Response parsed and rendered in-app
-      ↓
+      |
 0 bytes sent to any external server
 ```
 
@@ -150,28 +150,28 @@ Response parsed and rendered in-app
 ## Privacy Architecture
 
 ```
-┌─────────────────────────────────────┐
-│           Your Device               │
-│                                     │
-│  CodeVault App                      │
-│       ↕                             │
-│  RunAnywhere SDK                    │
-│       ↕                             │
-│  LlamaCpp Runtime                   │
-│       ↕                             │
-│  GGUF Model (stored locally)        │
-│                                     │
-│  ✗ No outbound network calls        │
-│  ✗ No API keys required             │
-│  ✗ No telemetry or logging          │
-└─────────────────────────────────────┘
++-------------------------------------+
+|           Your Device               |
+|                                     |
+|  CodeVault App                      |
+|       |                             |
+|  RunAnywhere SDK                    |
+|       |                             |
+|  LlamaCpp Runtime                   |
+|       |                             |
+|  GGUF Model (stored locally)        |
+|                                     |
+|  No outbound network calls          |
+|  No API keys required               |
+|  No telemetry or logging            |
++-------------------------------------+
 ```
 
 ---
 
 ## Team
 
-Built at the **GPT Challenge Hackathon** — Singularity × RunAnywhere.
+Built at the **GPT Challenge Hackathon** — Singularity x RunAnywhere.
 
 | Name | Role |
 |---|---|
@@ -181,7 +181,7 @@ Built at the **GPT Challenge Hackathon** — Singularity × RunAnywhere.
 
 ## Hackathon Context
 
-**Event:** GPT Challenge Hackathon — Singularity × RunAnywhere
+**Event:** GPT Challenge Hackathon — Singularity x RunAnywhere
 **Theme:** On-device AI applications that preserve privacy and eliminate cloud dependency
 **Category:** Developer Tools / Privacy
 
@@ -199,7 +199,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ---
 
-<div align="center">
-  <strong>🔒 CodeVault — Your code stays on your device. Always.</strong><br/>
-  <sub>Powered by RunAnywhere SDK · LlamaCpp · React Native</sub>
-</div>
+**CodeVault — Your code stays on your device. Always.**
+
+Powered by RunAnywhere SDK · LlamaCpp · React Native
